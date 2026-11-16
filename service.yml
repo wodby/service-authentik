@@ -75,6 +75,11 @@ env:
   value: 'true'
 - name: AUTHENTIK_ERROR_REPORTING__ENABLED
   value: 'false'
+# authentik would otherwise add the cluster it runs in as an outpost
+# integration through the pod's service account, which has no permission to
+# deploy outposts. The embedded outpost is unaffected.
+- name: AUTHENTIK_OUTPOSTS__DISCOVER
+  value: 'false'
 
 links:
 - name: postgres

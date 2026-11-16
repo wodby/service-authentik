@@ -20,6 +20,7 @@ Uploaded files, such as application icons, brand logos and flow backgrounds, and
 - `AUTHENTIK_WEB__BASE_URL` is the service's URL in the environment. authentik copies it into its system settings only when no base URL is stored yet, so after the domain changes, update the base URL in **System > Settings**.
 - TLS ends at Wodby's router, which sets `X-Forwarded-Proto`. authentik trusts forwarded headers from private network addresses (its default).
 - The update check, anonymous startup analytics and error reporting are off. New releases arrive as new versions of this service.
+- `AUTHENTIK_OUTPOSTS__DISCOVER` is `false`, so authentik does not add the cluster it runs in as an outpost integration. The pod's service account has no permission to deploy outposts. The embedded outpost, served by the server, still works.
 
 ## First administrator
 
