@@ -1,0 +1,283 @@
+name: authentik
+title: authentik
+guidance: GUIDANCE.md
+icon: authentik
+type: service
+# Server and worker replicas share the PostgreSQL database and the shared file
+# storage, so both can run more than one replica.
+scalable: true
+
+labels:
+- authentik
+- identity
+- authentication
+
+# authentik refuses to skip a release when it upgrades its database, so only
+# consecutive releases are offered.
+options:
+- version: '2026.8'
+  tag: '2026.8.5'
+  default: true
+- version: '2026.5'
+  tag: '2026.5.8'
+
+endpoints:
+- name: authentik
+  ports:
+  - name: http
+    number: 9000
+    protocol: http
+    main: true
+    routeDefaults:
+      https_redirect: 'true'
+
+tokens:
+# Signs cookies and sessions. Changing it signs everyone out.
+- name: secret_key
+  generate:
+    regex: '[A-Za-z0-9]{64}'
+
+settings:
+# The administrator account (akadmin) the first deployment creates. The public
+# initial setup flow is closed as soon as this account has a password.
+- name: admin-email
+  title: Admin email
+  description: Email address of the akadmin administrator. Used only when the
+    first deployment creates the administrator.
+  required: true
+  var: AUTHENTIK_BOOTSTRAP_EMAIL
+- name: admin-password
+  title: Admin password
+  description: Password of the akadmin administrator. Used only when the first
+    deployment creates the administrator; change it in authentik afterwards.
+  required: true
+  secret: true
+  var: AUTHENTIK_BOOTSTRAP_PASSWORD
+
+env:
+- name: AUTHENTIK_SECRET_KEY
+  value: '{{secret_key}}'
+  secret: true
+# authentik stores it as the instance's base URL the first time it starts, for
+# links built outside a request, such as those in emails. Change it later in
+# authentik's system settings.
+- name: AUTHENTIK_WEB__BASE_URL
+  value: '{{service.primaryURL}}'
+# Encrypt the database connection when the server supports it, as managed
+# PostgreSQL servers usually require. authentik's own default is no TLS.
+- name: AUTHENTIK_POSTGRESQL__SSLMODE
+  value: prefer
+# Wodby delivers new releases through the service versions, so authentik's own
+# update check and anonymous startup analytics are off.
+- name: AUTHENTIK_DISABLE_UPDATE_CHECK
+  value: 'true'
+- name: AUTHENTIK_DISABLE_STARTUP_ANALYTICS
+  value: 'true'
+- name: AUTHENTIK_ERROR_REPORTING__ENABLED
+  value: 'false'
+
+links:
+- name: postgres
+  title: PostgreSQL
+  required: true
+  selectors:
+  - type: db
+    labels:
+    - postgres
+  env:
+  - name: AUTHENTIK_POSTGRESQL__HOST
+    value: '{{link.database.host}}'
+  - name: AUTHENTIK_POSTGRESQL__PORT
+    value: '{{link.database.port}}'
+  - name: AUTHENTIK_POSTGRESQL__NAME
+    value: '{{link.database.db.name}}'
+  - name: AUTHENTIK_POSTGRESQL__USER
+    value: '{{link.database.user.name}}'
+    secret: true
+  - name: AUTHENTIK_POSTGRESQL__PASSWORD
+    value: '{{link.database.user.password}}'
+    secret: true
+# Uploaded files, such as application icons and brand logos, and reports the
+# worker writes. The server and the worker must see the same files.
+- name: storage
+  title: Shared file storage
+  required: true
+  selectors:
+  - type: storage
+- name: sendmail
+  title: SMTP server
+  selectors:
+  - type: service
+    labels:
+    - smtpd
+  env:
+  - name: AUTHENTIK_EMAIL__HOST
+    value: '{{link.host}}'
+  - name: AUTHENTIK_EMAIL__PORT
+    value: '{{link.port}}'
+  - name: AUTHENTIK_EMAIL__USE_TLS
+    value: 'false'
+  - name: AUTHENTIK_EMAIL__USE_SSL
+    value: 'false'
+  - name: AUTHENTIK_EMAIL__FROM
+    value: 'noreply@{{service.primaryHost}}'
+
+volumes:
+- name: data
+  title: Uploaded files
+  link: storage
+  shared: true
+  size: 5
+  path: /data
+
+# The worker runs background tasks: blueprints, outpost management, email,
+# synchronization with directories and cleanup. authentik needs it running.
+derivatives:
+- name: authentik-worker
+  icon: authentik
+  title: Worker
+  type: service
+  required: true
+  default: true
+  args:
+  - worker
+  resources:
+    request:
+      cpu: 100
+      memory: 384
+    limit:
+      memory: 1024
+  helm:
+    values:
+    - name: service.enabled
+      value: false
+    - name: containerPorts
+      value: []
+    - name: startupProbe
+      value:
+        exec:
+          command:
+          - ak
+          - healthcheck
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 10
+        # The first start waits for the database migrations.
+        failureThreshold: 60
+    - name: livenessProbe
+      value:
+        exec:
+          command:
+          - ak
+          - healthcheck
+        periodSeconds: 30
+        timeoutSeconds: 10
+        failureThreshold: 3
+    - name: readinessProbe
+      value:
+        exec:
+          command:
+          - ak
+          - healthcheck
+        periodSeconds: 10
+        timeoutSeconds: 10
+        failureThreshold: 3
+
+deployment:
+  strategy: rolling
+  minReady: 10s
+  progressDeadline: 15m
+  shutdownGracePeriod: 60s
+
+helm:
+  name: wodby
+  source: oci://registry-1.docker.io/wodby/stateless
+  chart: oci://registry-1.docker.io/wodby/stateless
+  version: 0.4.0
+  valueMappings:
+    replicas: replicaCount
+    nameOverride: nameOverride
+    fullnameOverride: fullnameOverride
+    serviceAccountName: serviceAccount.name
+    serviceAccountCreate: serviceAccount.create
+    strategy: strategy
+    minReady: minReadySeconds
+    progressDeadline: progressDeadlineSeconds
+    shutdownGracePeriod: terminationGracePeriodSeconds
+  values:
+  - name: containerName
+    value: authentik
+  - name: args
+    value:
+    - server
+  - name: containerPorts
+    value:
+    - name: http
+      containerPort: 9000
+      protocol: TCP
+  - name: securityContext
+    value:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      runAsGroup: 1000
+      runAsNonRoot: true
+      runAsUser: 1000
+  - name: startupProbe
+    value:
+      httpGet:
+        path: /-/health/live/
+        port: http
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      # The first start and new versions migrate the database first.
+      failureThreshold: 60
+  - name: readinessProbe
+    value:
+      httpGet:
+        path: /-/health/ready/
+        port: http
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+  - name: livenessProbe
+    value:
+      httpGet:
+        path: /-/health/live/
+        port: http
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+workloads:
+- name: main
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: '{{helm.release}}'
+  kind: deployment
+  primary: true
+  helm:
+    labels: podLabels
+    annotations: podAnnotations
+    volumes: extraVolumes
+    sidecars: extraContainers
+  containers:
+  - name: authentik
+    image: ghcr.io/goauthentik/server
+    resources:
+      request:
+        cpu: 200
+        memory: 768
+      limit:
+        memory: 1536
+    helm:
+      resources: resources
+      env: envVars
+      mounts: extraVolumeMounts
+      image:
+        registry: image.registry
+        repository: image.repository
+        tag: image.tag
+        pullPolicy: image.pullPolicy
