@@ -16,11 +16,13 @@ labels:
 # consecutive releases are offered.
 options:
 - version: '2026.8'
-  tag: '2026.8.5'
+  tag: '2026.8.6'
+  digest: sha256:da89d8338a3b1889800eb033fd61f8d43f7aa9a1c5a042cb5e03d891b1f0c56c
   default: true
 - version: '2026.5'
   tag: '2026.5.8'
 
+  digest: sha256:0ab5658f7f4963f2964cffe0963fa1ef2fa84c21a259489d6fdded789d82492e
 endpoints:
 - name: authentik
   ports:
@@ -42,14 +44,12 @@ settings:
 # initial setup flow is closed as soon as this account has a password.
 - name: admin-email
   title: Admin email
-  description: Email address of the akadmin administrator. Used only when the
-    first deployment creates the administrator.
+  description: Email address of the akadmin administrator. Used only when the first deployment creates the administrator.
   required: true
   var: AUTHENTIK_BOOTSTRAP_EMAIL
 - name: admin-password
   title: Admin password
-  description: Password of the akadmin administrator. Used only when the first
-    deployment creates the administrator; change it in authentik afterwards.
+  description: Password of the akadmin administrator. Used only when the first deployment creates the administrator; change it in authentik afterwards.
   required: true
   secret: true
   var: AUTHENTIK_BOOTSTRAP_PASSWORD
